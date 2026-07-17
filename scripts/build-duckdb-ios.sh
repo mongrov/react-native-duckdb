@@ -169,18 +169,19 @@ xcodebuild -create-xcframework \
   -output "${BUILD_DIR}/DuckDB.xcframework" \
   2>&1 | tail -3
 
-# Step 4: Copy xcframework into package/ so CocoaPods can find it
-# vendored_frameworks paths must be within the pod source tree
-PACKAGE_DIR="${REPO_DIR}/package"
-rm -rf "${PACKAGE_DIR}/DuckDB.xcframework"
-cp -R "${BUILD_DIR}/DuckDB.xcframework" "${PACKAGE_DIR}/DuckDB.xcframework"
+# Step 4: Copy xcframework into the module root so CocoaPods can find it.
+# vendored_frameworks paths must be within the pod source tree.
+# Post-mongrov-restructure, the module root IS the repo root.
+MODULE_ROOT="${REPO_DIR}"
+rm -rf "${MODULE_ROOT}/DuckDB.xcframework"
+cp -R "${BUILD_DIR}/DuckDB.xcframework" "${MODULE_ROOT}/DuckDB.xcframework"
 
 # Step 5: Write extension metadata for podspec to read
-EXT_META="${PACKAGE_DIR}/.duckdb-extensions.json"
+EXT_META="${MODULE_ROOT}/.duckdb-extensions.json"
 if [ "$NEEDS_HTTPFS" = true ]; then
   echo '{"httpfs":true}' > "$EXT_META"
 else
   echo '{}' > "$EXT_META"
 fi
 
-echo "=== DuckDB.xcframework created at ${PACKAGE_DIR}/DuckDB.xcframework ==="
+echo "=== DuckDB.xcframework created at ${MODULE_ROOT}/DuckDB.xcframework ==="

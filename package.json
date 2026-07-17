@@ -1,32 +1,138 @@
 {
-  "name": "react-native-duckdb-workspace",
-  "version": "0.1.0",
-  "packageManager": "bun@1.3.1",
-  "private": true,
-  "workspaces": [
-    "package",
-    "example"
+  "name": "react-native-duckdb",
+  "version": "1.0.0",
+  "description": "The analytical database for React Native — OLAP queries, full-text search, vector similarity search, and remote data on iOS and Android with native C++ performance",
+  "main": "./lib/module/index",
+  "module": "./lib/module/index",
+  "types": "./lib/typescript/module/index.d.ts",
+  "source": "./src/index",
+  "react-native": "./src/index",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./lib/typescript/module/index.d.ts",
+        "default": "./lib/module/index.js"
+      },
+      "require": {
+        "types": "./lib/typescript/commonjs/index.d.ts",
+        "default": "./lib/commonjs/index.js"
+      }
+    },
+    "./app.plugin.js": "./app.plugin.js"
+  },
+  "files": [
+    "src",
+    "lib",
+    "nitrogen",
+    "android",
+    "ios",
+    "cpp",
+    "vendor",
+    "scripts",
+    "app.plugin.js",
+    "plugin",
+    "RNDuckDB.podspec",
+    "!lib/typescript/example",
+    "!android/build",
+    "!android/.cxx",
+    "!android/.gradle",
+    "!ios/build",
+    "!plugin/src",
+    "!**/__tests__",
+    "!**/__fixtures__",
+    "!**/__mocks__"
   ],
   "scripts": {
-    "typecheck": "bun --filter=\"**\" typecheck",
-    "lint": "bun package lint",
-    "clean": "rm -rf **/tsconfig.tsbuildinfo node_modules package/node_modules package/lib",
-    "package": "bun --cwd package",
-    "example": "bun --cwd example"
+    "build": "bun typecheck && bob build && bun run build:plugin",
+    "build:plugin": "tsc --project plugin/tsconfig.json",
+    "specs": "bun typecheck && bun nitrogen --logLevel=\"debug\"",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint \"**/*.{js,ts,tsx}\" --fix",
+    "test": "jest",
+    "prepublishOnly": "bun run build"
   },
+  "keywords": [
+    "react-native",
+    "duckdb",
+    "nitro-modules",
+    "analytics",
+    "database",
+    "ios",
+    "android",
+    "olap",
+    "sql",
+    "parquet",
+    "vector-search",
+    "full-text-search",
+    "embedded-database"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pranshuchittora/react-native-duckdb.git"
+  },
+  "homepage": "https://github.com/pranshuchittora/react-native-duckdb",
+  "bugs": {
+    "url": "https://github.com/pranshuchittora/react-native-duckdb/issues"
+  },
+  "author": "Pranshu Chittora",
+  "license": "MIT",
   "engines": {
-    "node": ">=20"
+    "node": ">=18"
   },
-  "dependencies": {
-    "react": "19.1.1",
-    "react-native": "0.82.1",
-    "react-native-nitro-modules": "0.33.9"
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/"
   },
   "devDependencies": {
-    "@react-native/babel-preset": "0.82.1",
-    "@react-native/metro-config": "0.82.1",
+    "@expo/config-plugins": "^9.0.0",
+    "@types/node": "^25.3.0",
+    "jest": "^30.2.0",
     "nitrogen": "0.33.9",
-    "prettier": "^3.6.2",
-    "typescript": "^5.8.3"
+    "react": "19.1.1",
+    "react-native": "0.82.1",
+    "react-native-builder-bob": "^0.40.18",
+    "react-native-nitro-modules": "0.33.9"
+  },
+  "peerDependencies": {
+    "expo": ">=51.0.0",
+    "react": ">=17.0.0",
+    "react-native": ">=0.76.0",
+    "react-native-nitro-modules": ">=0.33.0"
+  },
+  "peerDependenciesMeta": {
+    "expo": {
+      "optional": true
+    }
+  },
+  "jest": {
+    "preset": "react-native",
+    "modulePathIgnorePatterns": [
+      "<rootDir>/example/node_modules",
+      "<rootDir>/lib/"
+    ]
+  },
+  "react-native-builder-bob": {
+    "source": "src",
+    "output": "lib",
+    "targets": [
+      [
+        "commonjs",
+        {
+          "esm": true
+        }
+      ],
+      [
+        "module",
+        {
+          "esm": true
+        }
+      ],
+      [
+        "typescript",
+        {
+          "tsc": "../node_modules/.bin/tsc",
+          "project": "tsconfig.build.json"
+        }
+      ]
+    ]
   }
 }
