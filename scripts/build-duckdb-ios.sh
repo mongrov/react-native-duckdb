@@ -14,6 +14,15 @@ MIN_IOS="${1:-15.1}"
 
 echo "=== react-native-duckdb: Building DuckDB for iOS (min=${MIN_IOS}, jobs=${JOBS}) ==="
 
+# Step 0: Ensure DuckDB source tree is present.
+# The full source tree (CMakeLists.txt + src/include/ + extension/) is
+# fetched at pod-install time by scripts/download-duckdb.sh — kept out
+# of the fork checkout (see .gitignore + FORK.md).
+if [ ! -f "${DUCKDB_DIR}/CMakeLists.txt" ]; then
+  echo "--- DuckDB source not found at ${DUCKDB_DIR} — running download-duckdb.sh ---"
+  bash "${SCRIPT_DIR}/download-duckdb.sh"
+fi
+
 # Step 1: Configure extensions
 echo "--- Configuring extensions ---"
 

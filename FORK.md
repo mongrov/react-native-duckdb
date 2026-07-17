@@ -53,53 +53,66 @@ it installable via
   `scripts/download-duckdb.sh` or (temporarily) manually initialized
   during the build-system verification session.
 
-## What is NOT yet done (deferred to build-system verification session)
+## Reconciled build scripts (Option B — this commit)
 
-The upstream build scripts on `main` are **internally inconsistent**:
+The prior WIP scripts were internally inconsistent:
 
-- `scripts/download-duckdb.sh` fetches the DuckDB **amalgamation**
+- `scripts/download-duckdb.sh` fetched the DuckDB **amalgamation**
   (single-file source: `duckdb.cpp/hpp/h`) into `vendor/duckdb/`.
-- `scripts/build-duckdb-ios.sh` runs `cmake -S ${REPO_DIR}/duckdb`,
+- `scripts/build-duckdb-ios.sh` ran `cmake -S ${REPO_DIR}/duckdb`,
   which requires a **full source tree** (submodule/tarball layout,
-  not amalgamation) with `src/include/`, `extension/`, `CMakeLists.txt`,
-  etc.
+  not amalgamation) with `src/include/`, `extension/`,
+  `CMakeLists.txt`, etc.
 
-These two paths are contradictory and cannot both succeed. The
-verification session needs to pick one strategy and reconcile:
+This session picks **Option B (source tarball at pod-install)**,
+recommended in the prior version of this file:
 
-- **Option A: submodule at pod-install time.** Add a `preinstall` or
-  `postinstall` step that runs
-  `git clone --depth=1 --branch=v1.4.4 https://github.com/duckdb/duckdb.git ./duckdb`.
-  Keeps CMake build unchanged. Adds ~200MB per install.
-- **Option B: source tarball at pod-install time.** Fetch
-  `duckdb/duckdb#v1.4.4` source tarball (`.tar.gz`, ~50MB), extract to
-  `./duckdb/`. Keeps CMake build unchanged. Smaller.
-- **Option C: amalgamation only, rewrite CMake build.** Replace
-  `build-duckdb-ios.sh`'s CMake logic with a direct
-  `clang++ -c duckdb.cpp` (amalgamation compile). **Loses DuckDB
-  extensions** (iceberg, parquet, httpfs, etc.), which the ZivaOne
-  analytics stack currently uses. Not viable without a substitute for
-  the extension load path.
+- `scripts/download-duckdb.sh` — rewritten to fetch
+  `github.com/duckdb/duckdb/archive/refs/tags/v1.4.4.tar.gz` (~50MB),
+  extract into `${REPO_DIR}/duckdb/` so the tree matches what CMake
+  expects. Idempotent (skips if `duckdb/CMakeLists.txt` already
+  exists).
+- `scripts/build-duckdb-ios.sh` — adds a Step 0 guard that invokes
+  `download-duckdb.sh` when `${DUCKDB_DIR}/CMakeLists.txt` is
+  missing. No other build-script changes.
+- `.gitignore` — `duckdb/` now ignored wholesale (source tree is
+  fetched at pod-install time, not committed). Stale
+  `package/DuckDB.xcframework/` entry replaced with root-level
+  `DuckDB.xcframework/` + `.duckdb-extensions.json` (post-restructure
+  locations).
 
-Recommendation: Option B (source tarball at pod-install), since it
-keeps the extension build path intact and doesn't require submodule
-lifecycle management from the consumer.
+Options A (submodule) and C (amalgamation-only rewrite of CMake)
+were both rejected — see prior version of this file for rationale.
+The extension build path (iceberg, parquet, httpfs) that the ZivaOne
+analytics stack depends on is preserved.
 
-### Also outstanding
+### package.json — Lane A workaround for missing `lib/`
+
+The fork does not commit `react-native-builder-bob` build output
+(`lib/`), so consumers installing from git cannot resolve
+`./lib/module/index` or `./lib/typescript/module/index.d.ts`. This
+commit switches to **Lane A**: drop `main`/`module`/`types` and
+rewrite `exports` main entry to point at `./src/index.ts` directly.
+
+- Metro resolves via the `react-native` field (`./src/index`) —
+  unchanged.
+- TypeScript consumers with `moduleResolution: "bundler"` (or
+  `"nodenext"` with `allowImportingTsExtensions`) resolve the
+  `types` condition to `./src/index.ts`.
+
+Lane B (commit `lib/` output to `wip/mongrov-restructure`) remains
+available if a downstream consumer breaks on `.ts` extension in
+exports. Not the default.
+
+## What is NOT yet done
 
 - **iOS pod-install verification** — 20-40 min per iteration; needs
   Xcode + iOS simulator. Verify DuckDB.xcframework builds and links.
 - **Android build verification** — CMakeLists + JNI adapter. Confirm
   extensions link correctly.
-- **`lib/` publish artifacts** — module uses
-  `react-native-builder-bob`; `main`/`module`/`types` fields point at
-  `./lib/module/index` and `./lib/typescript/module/index.d.ts` which
-  don't exist in a fresh git checkout (only produced by publish-time
-  build). Metro will still resolve via the `react-native` field
-  (`./src/index`), but `tsc` type-check will fail. Options: run the
-  builder-bob build in the fork and commit `lib/` under a
-  `mongrov-releases/` branch; or drop `main`/`module`/`types` fields;
-  or add a `postinstall` build step.
+- **Merge to `mongrov-releases`** — once both platforms verify, cut
+  a release branch and pin consumers to a SHA there (not the WIP
+  branch head).
 
 ## Merging back upstream
 
