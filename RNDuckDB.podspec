@@ -48,6 +48,15 @@ Pod::Spec.new do |s|
     "HEADER_SEARCH_PATHS" => '"$(PODS_TARGET_SRCROOT)/duckdb/src/include" "$(PODS_TARGET_SRCROOT)/cpp"',
   }
 
+  # CocoaPods does not auto-generate -l<library> for a vendored static
+  # xcframework whose inner .a name (libduckdb_combined.a) differs from the
+  # wrapper name (RNDuckDB). Inject the link flag + search path on user
+  # targets so the consuming app picks up DuckDB symbols at final link.
+  s.user_target_xcconfig = {
+    'OTHER_LDFLAGS' => '-lduckdb_combined',
+    'LIBRARY_SEARCH_PATHS' => '$(inherited) "$(PODS_CONFIGURATION_BUILD_DIR)/XCFrameworkIntermediates/RNDuckDB"',
+  }
+
   load 'nitrogen/generated/ios/RNDuckDB+autolinking.rb'
   add_nitrogen_files(s)
 
