@@ -26,6 +26,17 @@ const OUT_OF_TREE_EXTENSIONS = {
     git_url: 'https://github.com/duckdb/duckdb-httpfs',
     git_tag: '13f8a814d41a978c3f19eb1dc76069489652ea6f',
   },
+  iceberg: {
+    // Pinned to current HEAD (repo has no release tags as of 2026-07-24).
+    // Downstream consumers (e.g. @mongrov/analytics) LOAD iceberg at attach
+    // time; without this entry the extension isn't compiled into the
+    // xcframework and LOAD fails with extension_load_failed.
+    // Compatibility note: DuckDB v1.4.4 (per scripts/download-duckdb.sh) —
+    // verify the extension builds against that DuckDB version during the
+    // iOS/Android verification pass; bump the SHA if incompatibility surfaces.
+    git_url: 'https://github.com/duckdb/duckdb-iceberg',
+    git_tag: '28e81908af10cdc8b29ec305a40bf7fcdbc3604f',
+  },
   fts: {
     git_url: 'https://github.com/duckdb/duckdb-fts',
     git_tag: '39376623630a968154bef4e6930d12ad0b59d7fb',
