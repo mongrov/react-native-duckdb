@@ -52,6 +52,25 @@ if [ -f "$EXT_CONFIG" ] && grep -q "httpfs" "$EXT_CONFIG"; then
   echo "--- httpfs detected: will build OpenSSL + libcurl for each target ---"
 fi
 
+# Check if iceberg is in the generated extension config
+# (needs AWSSDK + roaring + supporting libs via vcpkg — hand-rolling AWSSDK
+# is ~20 libraries; vcpkg provides prebuilt iOS ports in ~5 min including
+# transitives, so we consume from a local vcpkg install instead).
+NEEDS_ICEBERG=false
+if [ -f "$EXT_CONFIG" ] && grep -q "iceberg" "$EXT_CONFIG"; then
+  NEEDS_ICEBERG=true
+  VCPKG_ROOT="${VCPKG_ROOT:-$HOME/vcpkg}"
+  echo "--- iceberg detected: will pull AWSSDK + roaring + friends from ${VCPKG_ROOT} ---"
+  # Fail fast if the vcpkg install is missing — better than a mid-build cmake error.
+  if [ ! -x "${VCPKG_ROOT}/vcpkg" ]; then
+    echo "ERROR: iceberg requires vcpkg at ${VCPKG_ROOT} (override via VCPKG_ROOT env var)."
+    echo "       Install with: git clone https://github.com/microsoft/vcpkg.git ${VCPKG_ROOT} && ${VCPKG_ROOT}/bootstrap-vcpkg.sh"
+    echo "       Then: ${VCPKG_ROOT}/vcpkg install 'aws-sdk-cpp[core,sso,sts]:arm64-ios-release' roaring:arm64-ios-release snappy:arm64-ios-release liblzma:arm64-ios-release jansson:arm64-ios-release"
+    echo "       And the arm64-ios-simulator-release variants of the same set."
+    exit 1
+  fi
+fi
+
 # Invalidate cached builds if extension config changed
 EXT_CONFIG_HASH=$(md5 -q "${EXT_CONFIG}" 2>/dev/null || md5sum "${EXT_CONFIG}" 2>/dev/null | cut -d' ' -f1 || echo "none")
 for BUILD_SUBDIR in "build-ios-iphoneos-arm64" "build-ios-iphonesimulator-arm64"; do
@@ -114,17 +133,56 @@ build_arch() {
   local SDK_PATH
   SDK_PATH="$(xcrun --sdk "${PLATFORM}" --show-sdk-path)"
 
+  # Consume AWSSDK + roaring + supporting libs from vcpkg when iceberg is enabled.
+  # Triplet mapping: iphoneos-arm64 → arm64-ios-release,
+  #                  iphonesimulator-arm64 → arm64-ios-simulator-release
+  #
+  # Under iOS cross-compile (CMAKE_SYSTEM_NAME=iOS), cmake defaults
+  # CMAKE_FIND_ROOT_PATH_MODE_{INCLUDE,LIBRARY,PACKAGE}=ONLY, which
+  # restricts find_file / find_package to the iOS SDK sysroot. vcpkg's
+  # install prefix lives outside the sysroot, so we must both extend
+  # CMAKE_FIND_ROOT_PATH and relax the modes to BOTH. Without this,
+  # AWSSDKConfig.cmake:94 aborts with "AWS SDK for C++ is missing".
+  local ICEBERG_CMAKE_FLAGS=()
+  if [ "$NEEDS_ICEBERG" = true ]; then
+    local VCPKG_TRIPLET=""
+    if [ "$PLATFORM" = "iphoneos" ]; then
+      VCPKG_TRIPLET="arm64-ios-release"
+    elif [ "$PLATFORM" = "iphonesimulator" ]; then
+      VCPKG_TRIPLET="arm64-ios-simulator-release"
+    fi
+    local VCPKG_INSTALL="${VCPKG_ROOT}/installed/${VCPKG_TRIPLET}"
+    if [ ! -d "${VCPKG_INSTALL}/share/awssdk" ]; then
+      echo "ERROR: iceberg requires vcpkg triplet ${VCPKG_TRIPLET} (missing ${VCPKG_INSTALL}/share/awssdk)."
+      echo "       Run: ${VCPKG_ROOT}/vcpkg install 'aws-sdk-cpp[core,sso,sts]:${VCPKG_TRIPLET}' roaring:${VCPKG_TRIPLET} snappy:${VCPKG_TRIPLET} liblzma:${VCPKG_TRIPLET} jansson:${VCPKG_TRIPLET}"
+      exit 1
+    fi
+    ICEBERG_CMAKE_FLAGS=(
+      -DAWSSDK_DIR="${VCPKG_INSTALL}/share/awssdk"
+      -DAWSSDK_ROOT_DIR="${VCPKG_INSTALL}"
+      -DCMAKE_PREFIX_PATH="${VCPKG_INSTALL}"
+      -DCMAKE_FIND_ROOT_PATH="${VCPKG_INSTALL};${SDK_PATH}"
+      -DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=BOTH
+      -DCMAKE_FIND_ROOT_PATH_MODE_LIBRARY=BOTH
+      -DCMAKE_FIND_ROOT_PATH_MODE_PACKAGE=BOTH
+    )
+  fi
+
+  # Do NOT pipe cmake through tail: bash pipefail is unreliable in practice
+  # here (a prior version of this script exited 0 despite a fatal cmake
+  # configuration error, silently producing no xcframework). Keep full output
+  # and let PIPESTATUS-free direct execution surface exit codes naturally.
   cmake -S "${DUCKDB_DIR}" -B "${FULL_BUILD_DIR}" -G "Unix Makefiles" \
     "${CMAKE_COMMON[@]}" \
     ${HTTPFS_CMAKE_FLAGS[@]+"${HTTPFS_CMAKE_FLAGS[@]}"} \
+    ${ICEBERG_CMAKE_FLAGS[@]+"${ICEBERG_CMAKE_FLAGS[@]}"} \
     -DCMAKE_SYSTEM_NAME=iOS \
     -DCMAKE_OSX_SYSROOT="${SDK_PATH}" \
     -DCMAKE_OSX_ARCHITECTURES="${ARCH}" \
     -DCMAKE_OSX_DEPLOYMENT_TARGET="${MIN_IOS}" \
-    -DDUCKDB_EXPLICIT_PLATFORM="ios_${ARCH}" \
-    2>&1 | tail -5
+    -DDUCKDB_EXPLICIT_PLATFORM="ios_${ARCH}"
 
-  cmake --build "${FULL_BUILD_DIR}" --config Release --target duckdb_static -j"${JOBS}" 2>&1 | tail -3
+  cmake --build "${FULL_BUILD_DIR}" --config Release --target duckdb_static -j"${JOBS}"
 
   # Combine all .a files into one per architecture
   local COMBINED="${FULL_BUILD_DIR}/libduckdb_combined.a"
