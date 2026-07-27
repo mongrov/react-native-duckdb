@@ -206,6 +206,30 @@ build_arch() {
     done
   fi
 
+  # Include vcpkg-installed static libs when iceberg is enabled.
+  # iceberg's compiled .o files reference AWSSDK + roaring symbols; without
+  # bundling the actual implementations into libduckdb_combined.a the final
+  # app link fails with "Undefined symbols" for Aws::* / roaring_bitmap_*.
+  # Mirrors the vendor OpenSSL/curl block above but sourced from vcpkg.
+  if [ "$NEEDS_ICEBERG" = true ]; then
+    local VCPKG_LIB="${VCPKG_INSTALL}/lib"
+    for vcpkg_lib in \
+      libaws-cpp-sdk-sts.a libaws-cpp-sdk-sso.a libaws-cpp-sdk-core.a \
+      libaws-crt-cpp.a \
+      libaws-c-s3.a libaws-c-auth.a libaws-c-http.a libaws-c-mqtt.a \
+      libaws-c-event-stream.a libaws-c-io.a libaws-c-compression.a \
+      libaws-c-sdkutils.a libaws-c-cal.a libaws-c-common.a \
+      libaws-checksums.a \
+      libs2n.a \
+      libroaring.a; do
+      if [ -f "${VCPKG_LIB}/${vcpkg_lib}" ]; then
+        ALL_LIBS+=("${VCPKG_LIB}/${vcpkg_lib}")
+      else
+        echo "WARNING: Expected vcpkg lib not found: ${VCPKG_LIB}/${vcpkg_lib}"
+      fi
+    done
+  fi
+
   if [ ${#ALL_LIBS[@]} -eq 0 ]; then
     echo "ERROR: No .a files found in ${FULL_BUILD_DIR}"
     exit 1
