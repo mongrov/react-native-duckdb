@@ -66,14 +66,23 @@ if [ -f "$EXT_CONFIG" ] && grep -q "iceberg" "$EXT_CONFIG"; then
     echo "ERROR: iceberg requires vcpkg at ${VCPKG_ROOT} (override via VCPKG_ROOT env var)."
     echo "       Install with: git clone https://github.com/microsoft/vcpkg.git ${VCPKG_ROOT} && ${VCPKG_ROOT}/bootstrap-vcpkg.sh"
     echo "       Then: ${VCPKG_ROOT}/vcpkg install 'aws-sdk-cpp[core,sso,sts]:arm64-ios-release' roaring:arm64-ios-release snappy:arm64-ios-release liblzma:arm64-ios-release jansson:arm64-ios-release"
-    echo "       And the arm64-ios-simulator-release variants of the same set."
+    echo "       And repeat for arm64-ios-simulator-release + x64-ios-simulator-release."
     exit 1
+  fi
+  # vcpkg doesn't ship an x64-ios-simulator triplet upstream (only x64-ios,
+  # which targets iphoneos, not simulator). Copy our bundled sim triplet in
+  # so `vcpkg install ...:x64-ios-simulator-release` resolves.
+  BUNDLED_TRIPLET="${SCRIPT_DIR}/vcpkg-triplets/x64-ios-simulator-release.cmake"
+  INSTALLED_TRIPLET="${VCPKG_ROOT}/triplets/community/x64-ios-simulator-release.cmake"
+  if [ -f "$BUNDLED_TRIPLET" ] && [ ! -f "$INSTALLED_TRIPLET" ]; then
+    echo "--- copying bundled triplet: ${BUNDLED_TRIPLET} -> ${INSTALLED_TRIPLET} ---"
+    cp "$BUNDLED_TRIPLET" "$INSTALLED_TRIPLET"
   fi
 fi
 
 # Invalidate cached builds if extension config changed
 EXT_CONFIG_HASH=$(md5 -q "${EXT_CONFIG}" 2>/dev/null || md5sum "${EXT_CONFIG}" 2>/dev/null | cut -d' ' -f1 || echo "none")
-for BUILD_SUBDIR in "build-ios-iphoneos-arm64" "build-ios-iphonesimulator-arm64"; do
+for BUILD_SUBDIR in "build-ios-iphoneos-arm64" "build-ios-iphonesimulator-arm64" "build-ios-iphonesimulator-x86_64"; do
   CACHED_HASH_FILE="${DUCKDB_DIR}/${BUILD_SUBDIR}/.extension_config_hash"
   if [ -d "${DUCKDB_DIR}/${BUILD_SUBDIR}" ]; then
     if [ ! -f "$CACHED_HASH_FILE" ] || [ "$(cat "$CACHED_HASH_FILE")" != "$EXT_CONFIG_HASH" ]; then
@@ -149,7 +158,15 @@ build_arch() {
     if [ "$PLATFORM" = "iphoneos" ]; then
       VCPKG_TRIPLET="arm64-ios-release"
     elif [ "$PLATFORM" = "iphonesimulator" ]; then
-      VCPKG_TRIPLET="arm64-ios-simulator-release"
+      if [ "$ARCH" = "x86_64" ]; then
+        # Custom triplet — vcpkg ships only x64-ios (device); we install a
+        # sim variant to scripts/vcpkg-triplets/x64-ios-simulator-release.cmake
+        # and copy it into ~/vcpkg/triplets/community/ during setup. See
+        # the docstring at the top of this script for install instructions.
+        VCPKG_TRIPLET="x64-ios-simulator-release"
+      else
+        VCPKG_TRIPLET="arm64-ios-simulator-release"
+      fi
     fi
     local VCPKG_INSTALL="${VCPKG_ROOT}/installed/${VCPKG_TRIPLET}"
     if [ ! -d "${VCPKG_INSTALL}/share/awssdk" ]; then
@@ -243,9 +260,27 @@ build_arch() {
   echo "$EXT_CONFIG_HASH" > "${FULL_BUILD_DIR}/.extension_config_hash"
 }
 
-# Step 2: Build for device and simulator
+# Step 2: Build for device and both simulator archs
 build_arch "iphoneos" "arm64"
 build_arch "iphonesimulator" "arm64"
+build_arch "iphonesimulator" "x86_64"
+
+# Step 2.5: Lipo the two simulator arches into a fat binary. xcframework
+# expects one slice per (platform, arch-set); the standard shape is a
+# device slice (arm64) + a fat simulator slice (arm64 + x86_64). Fat sim
+# means Xcode auto-picks the right arch when linking against the
+# framework from an Apple Silicon or Intel host.
+FAT_SIM_DIR="${DUCKDB_DIR}/build-ios-iphonesimulator-fat"
+FAT_SIM_LIB="${FAT_SIM_DIR}/libduckdb_combined.a"
+mkdir -p "${FAT_SIM_DIR}"
+echo "--- Lipo-combining simulator archs into ${FAT_SIM_LIB} ---"
+lipo -create \
+  "${DUCKDB_DIR}/build-ios-iphonesimulator-arm64/libduckdb_combined.a" \
+  "${DUCKDB_DIR}/build-ios-iphonesimulator-x86_64/libduckdb_combined.a" \
+  -output "${FAT_SIM_LIB}"
+echo "   Fat sim: ${FAT_SIM_LIB} ($(du -h "${FAT_SIM_LIB}" | cut -f1))"
+# Sanity check — both archs present
+lipo -info "${FAT_SIM_LIB}"
 
 # Step 3: Create xcframework
 echo "--- Creating DuckDB.xcframework ---"
@@ -255,10 +290,9 @@ mkdir -p "${BUILD_DIR}"
 xcodebuild -create-xcframework \
   -library "${DUCKDB_DIR}/build-ios-iphoneos-arm64/libduckdb_combined.a" \
   -headers "${DUCKDB_DIR}/src/include" \
-  -library "${DUCKDB_DIR}/build-ios-iphonesimulator-arm64/libduckdb_combined.a" \
+  -library "${FAT_SIM_LIB}" \
   -headers "${DUCKDB_DIR}/src/include" \
-  -output "${BUILD_DIR}/DuckDB.xcframework" \
-  2>&1 | tail -3
+  -output "${BUILD_DIR}/DuckDB.xcframework"
 
 # Step 4: Copy xcframework into the module root so CocoaPods can find it.
 # vendored_frameworks paths must be within the pod source tree.

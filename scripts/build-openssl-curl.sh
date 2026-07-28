@@ -4,7 +4,7 @@ set -euo pipefail
 # Cross-compile OpenSSL and libcurl for iOS and Android targets.
 # Usage: build-openssl-curl.sh <platform> <arch>
 #   platform: ios | android
-#   arch: arm64, simulator-arm64 (iOS), arm64-v8a, x86_64 (Android)
+#   arch: arm64, simulator-arm64, simulator-x86_64 (iOS), arm64-v8a, x86_64 (Android)
 #
 # Output: vendor/openssl/{platform}-{arch}/ and vendor/curl/{platform}-{arch}/
 # Cached: skip rebuild if output exists with matching version marker.
@@ -28,6 +28,7 @@ usage() {
   echo "Platforms and architectures:"
   echo "  ios     arm64            (iPhone device)"
   echo "  ios     simulator-arm64  (iPhone Simulator on Apple Silicon)"
+  echo "  ios     simulator-x86_64 (iPhone Simulator on Intel Mac / Rosetta)"
   echo "  android arm64-v8a        (Android 64-bit ARM)"
   echo "  android x86_64           (Android 64-bit x86, emulator)"
   echo ""
@@ -118,6 +119,16 @@ build_openssl() {
     ios-simulator-arm64)
       CONFIGURE_TARGET="iossimulator-xcrun"
       EXTRA_FLAGS=("-miphonesimulator-version-min=15.1")
+      ;;
+    ios-simulator-x86_64)
+      # OpenSSL's iossimulator-xcrun target hardcodes CC to
+      # `xcrun -sdk iphonesimulator cc`, which defaults to the host arch
+      # (arm64 on Apple Silicon). Force x86_64 by overriding CC — passing
+      # `-arch x86_64` as an EXTRA_FLAG makes Configure interpret x86_64 as
+      # another target selection ("target already defined - iossimulator-xcrun").
+      CONFIGURE_TARGET="iossimulator-xcrun"
+      EXTRA_FLAGS=("-miphonesimulator-version-min=15.1")
+      export CC="xcrun -sdk iphonesimulator cc -arch x86_64"
       ;;
     android-arm64-v8a)
       [ -z "${ANDROID_NDK_ROOT:-}" ] && { echo "ERROR: ANDROID_NDK_ROOT not set"; exit 1; }
@@ -226,6 +237,14 @@ build_curl() {
         -DCMAKE_SYSTEM_NAME=iOS
         -DCMAKE_OSX_SYSROOT="$(xcrun --sdk iphonesimulator --show-sdk-path)"
         -DCMAKE_OSX_ARCHITECTURES=arm64
+        -DCMAKE_OSX_DEPLOYMENT_TARGET=15.1
+      )
+      ;;
+    ios-simulator-x86_64)
+      CMAKE_ARGS+=(
+        -DCMAKE_SYSTEM_NAME=iOS
+        -DCMAKE_OSX_SYSROOT="$(xcrun --sdk iphonesimulator --show-sdk-path)"
+        -DCMAKE_OSX_ARCHITECTURES=x86_64
         -DCMAKE_OSX_DEPLOYMENT_TARGET=15.1
       )
       ;;
