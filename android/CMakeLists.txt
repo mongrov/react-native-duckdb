@@ -98,6 +98,76 @@ if(EXISTS "${EXT_CONFIG_PATH}")
   endif()
 endif()
 
+# Check if iceberg is in the extension config — needs AWSSDK + roaring + friends
+# from vcpkg (same shape as iOS, see scripts/build-duckdb-ios.sh). Iceberg
+# depends on AWSSDK C++ + aws-c-* CRT libs, which are 64-bit only for the
+# same reasons httpfs is (no vcpkg triplet for 32-bit android).
+set(_ICEBERG_ENABLED FALSE)
+if(EXISTS "${EXT_CONFIG_PATH}")
+  file(READ "${EXT_CONFIG_PATH}" _ext_config_content_iceberg)
+  if(_ext_config_content_iceberg MATCHES "iceberg")
+    if(ANDROID_ABI STREQUAL "armeabi-v7a" OR ANDROID_ABI STREQUAL "x86")
+      message(WARNING "react-native-duckdb: iceberg skipped for ${ANDROID_ABI} (32-bit not supported). iceberg's AWSSDK deps are 64-bit-only.")
+      # Strip iceberg from extension config so DuckDB doesn't try to build it.
+      # Mirror the httpfs 32-bit-skip pattern above.
+      file(STRINGS "${EXT_CONFIG_PATH}" _ext_lines_iceberg)
+      file(WRITE "${EXT_CONFIG_PATH}" "")
+      foreach(_line IN LISTS _ext_lines_iceberg)
+        if(NOT _line MATCHES "duckdb_extension_load\\(iceberg")
+          file(APPEND "${EXT_CONFIG_PATH}" "${_line}\n")
+        endif()
+      endforeach()
+    else()
+      # Resolve VCPKG_ROOT — default $HOME/vcpkg, env override.
+      if(DEFINED ENV{VCPKG_ROOT})
+        set(_VCPKG_ROOT "$ENV{VCPKG_ROOT}")
+      else()
+        set(_VCPKG_ROOT "$ENV{HOME}/vcpkg")
+      endif()
+
+      # Auto-copy bundled x64-android-release triplet into vcpkg if missing.
+      # Upstream vcpkg ships arm64-android-release but not x64-android-release;
+      # we bundle the custom triplet in scripts/vcpkg-triplets/ and copy it in
+      # so `vcpkg install …:x64-android-release` resolves.
+      set(_BUNDLED_TRIPLET "${CMAKE_SOURCE_DIR}/../../scripts/vcpkg-triplets/x64-android-release.cmake")
+      set(_INSTALLED_TRIPLET "${_VCPKG_ROOT}/triplets/community/x64-android-release.cmake")
+      if(EXISTS "${_BUNDLED_TRIPLET}" AND NOT EXISTS "${_INSTALLED_TRIPLET}")
+        message(STATUS "react-native-duckdb: copying bundled triplet ${_BUNDLED_TRIPLET} -> ${_INSTALLED_TRIPLET}")
+        configure_file("${_BUNDLED_TRIPLET}" "${_INSTALLED_TRIPLET}" COPYONLY)
+      endif()
+
+      # ABI -> vcpkg triplet
+      if(ANDROID_ABI STREQUAL "arm64-v8a")
+        set(_VCPKG_TRIPLET "arm64-android-release")
+      elseif(ANDROID_ABI STREQUAL "x86_64")
+        set(_VCPKG_TRIPLET "x64-android-release")
+      endif()
+
+      set(_VCPKG_INSTALL "${_VCPKG_ROOT}/installed/${_VCPKG_TRIPLET}")
+      if(NOT EXISTS "${_VCPKG_INSTALL}/share/awssdk/AWSSDKConfig.cmake")
+        message(FATAL_ERROR "react-native-duckdb: iceberg requires vcpkg triplet ${_VCPKG_TRIPLET} at ${_VCPKG_INSTALL} (missing share/awssdk/AWSSDKConfig.cmake). Run:\n  ${_VCPKG_ROOT}/vcpkg install 'aws-sdk-cpp[core,sso,sts]:${_VCPKG_TRIPLET}' roaring:${_VCPKG_TRIPLET} snappy:${_VCPKG_TRIPLET} liblzma:${_VCPKG_TRIPLET} jansson:${_VCPKG_TRIPLET}\n(Requires ANDROID_NDK_HOME env var pointing at your NDK install.)")
+      endif()
+
+      message(STATUS "react-native-duckdb: iceberg detected, using vcpkg triplet ${_VCPKG_TRIPLET} at ${_VCPKG_INSTALL}")
+
+      # Same CMAKE_FIND_ROOT_PATH_MODE gotcha as iOS: under cross-compile
+      # cmake defaults these to ONLY (restricted to Android sysroot), and
+      # vcpkg's install prefix lives outside the sysroot. Relax to BOTH
+      # so find_package(AWSSDK) + find_package(roaring CONFIG) resolve.
+      list(APPEND CMAKE_PREFIX_PATH "${_VCPKG_INSTALL}")
+      set(AWSSDK_ROOT_DIR "${_VCPKG_INSTALL}" CACHE PATH "" FORCE)
+      set(AWSSDK_DIR "${_VCPKG_INSTALL}/share/awssdk" CACHE PATH "" FORCE)
+      list(APPEND CMAKE_FIND_ROOT_PATH "${_VCPKG_INSTALL}")
+      set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE BOTH)
+      set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY BOTH)
+      set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE BOTH)
+
+      set(_ICEBERG_ENABLED TRUE)
+      set(_ICEBERG_VCPKG_LIB "${_VCPKG_INSTALL}/lib")
+    endif()
+  endif()
+endif()
+
 # Check if VSS extension is in the config — needs aligned_alloc workaround on Android.
 # Android Bionic's aligned_alloc requires API level 28+, but we target API 24.
 # The usearch library (bundled in duckdb-vss) calls aligned_alloc directly.
@@ -168,6 +238,37 @@ if(_HTTPFS_ENABLED)
     ${OPENSSL_CRYPTO_LIBRARY}
     ${CURL_LIBRARY}
     ${ZLIB_LIB}
+  )
+endif()
+
+# Link vcpkg-installed AWSSDK + CRT + roaring into our .so when iceberg is
+# enabled. iceberg's compiled .o files (pulled in via link_extension_libraries)
+# reference Aws::* + roaring_* symbols; the actual implementations live in
+# these .a archives. Wrap in --start-group/--end-group because static-lib
+# link order across the AWS C SDK is finicky (aws-crt-cpp depends on
+# aws-c-*, which depend on each other in a cycle at link time). GNU-style
+# linkers (LLVM ld64 on NDK) honor these markers.
+if(_ICEBERG_ENABLED)
+  target_link_libraries(${CMAKE_PROJECT_NAME}
+    -Wl,--start-group
+    ${_ICEBERG_VCPKG_LIB}/libaws-cpp-sdk-sts.a
+    ${_ICEBERG_VCPKG_LIB}/libaws-cpp-sdk-sso.a
+    ${_ICEBERG_VCPKG_LIB}/libaws-cpp-sdk-core.a
+    ${_ICEBERG_VCPKG_LIB}/libaws-crt-cpp.a
+    ${_ICEBERG_VCPKG_LIB}/libaws-c-s3.a
+    ${_ICEBERG_VCPKG_LIB}/libaws-c-auth.a
+    ${_ICEBERG_VCPKG_LIB}/libaws-c-http.a
+    ${_ICEBERG_VCPKG_LIB}/libaws-c-mqtt.a
+    ${_ICEBERG_VCPKG_LIB}/libaws-c-event-stream.a
+    ${_ICEBERG_VCPKG_LIB}/libaws-c-io.a
+    ${_ICEBERG_VCPKG_LIB}/libaws-c-compression.a
+    ${_ICEBERG_VCPKG_LIB}/libaws-c-sdkutils.a
+    ${_ICEBERG_VCPKG_LIB}/libaws-c-cal.a
+    ${_ICEBERG_VCPKG_LIB}/libaws-c-common.a
+    ${_ICEBERG_VCPKG_LIB}/libaws-checksums.a
+    ${_ICEBERG_VCPKG_LIB}/libs2n.a
+    ${_ICEBERG_VCPKG_LIB}/libroaring.a
+    -Wl,--end-group
   )
 endif()
 
