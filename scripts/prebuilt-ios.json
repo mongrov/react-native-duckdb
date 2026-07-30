@@ -1,0 +1,11 @@
+{
+  "repo": "mongrov/react-native-duckdb",
+  "tag": "prebuilt-ios-duckdb-v1.4.4-r1",
+  "duckdb": "v1.4.4",
+  "artifacts": {
+    "httpfs,iceberg,parquet": {
+      "asset": "DuckDB-ios-httpfs-iceberg-parquet.tar.gz",
+      "sha256": "aa1bc20a9df624824f4f438f5d9f77ce2a3ab4657f1dd806d5d8cc2f1823af7c"
+    }
+  }
+}

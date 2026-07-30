@@ -104,6 +104,40 @@ Lane B (commit `lib/` output to `wip/mongrov-restructure`) remains
 available if a downstream consumer breaks on `.ts` extension in
 exports. Not the default.
 
+## Prebuilt xcframework (2026-07-30)
+
+`pod install` no longer compiles DuckDB from source by default.
+`scripts/build-duckdb-ios.sh` first calls
+`scripts/fetch-prebuilt-duckdb.sh`, which downloads a prebuilt
+`DuckDB.xcframework` from this repo's GitHub releases, verifies its
+sha256, and lays down `DuckDB.xcframework/` + `duckdb/src/include/`
+(the headers the podspec's `HEADER_SEARCH_PATHS` points at) — no
+DuckDB source tree, vcpkg, AWSSDK, or OpenSSL/curl vendor builds
+needed on consumer machines. A ~160MB download replaces a 15-30 min
+cold compile.
+
+- **Manifest:** `scripts/prebuilt-ios.json` pins the release tag and,
+  per extension set (sorted, comma-joined key), the asset name +
+  sha256. Extension sets without a published asset (and any fetch
+  failure: offline, checksum mismatch) fall back to the source build
+  automatically.
+- **Opt out:** `DUCKDB_BUILD_FROM_SOURCE=1 pod install` forces the
+  source-build path.
+- **Cache:** `.duckdb-prebuilt` at the module root records the
+  tarball sha256; matching marker + existing xcframework skips the
+  download (re-run cost: <0.1s).
+- **Publishing a new artifact** (DuckDB bump or new extension set):
+  run the source build for the target extension set, then from the
+  module root
+  `tar -czf DuckDB-ios-<sorted-ext-dashes>.tar.gz DuckDB.xcframework duckdb/src/include`,
+  `gh release create <tag> --repo mongrov/react-native-duckdb <tarball>`,
+  and update `scripts/prebuilt-ios.json` with the tag + sha256.
+
+Current release: `prebuilt-ios-duckdb-v1.4.4-r1` — DuckDB v1.4.4,
+extensions `httpfs,iceberg,parquet` (the ZivaOne shape), built from
+the toolchain at `784c135`; same binary verified end-to-end in the
+ZivaOne iOS build on 2026-07-28.
+
 ## What is NOT yet done
 
 - **iOS pod-install verification** — 20-40 min per iteration; needs

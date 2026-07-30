@@ -14,18 +14,6 @@ MIN_IOS="${1:-15.1}"
 
 echo "=== react-native-duckdb: Building DuckDB for iOS (min=${MIN_IOS}, jobs=${JOBS}) ==="
 
-# Step 0: Ensure DuckDB source tree is present.
-# The full source tree (CMakeLists.txt + src/include/ + extension/) is
-# fetched at pod-install time by scripts/download-duckdb.sh — kept out
-# of the fork checkout (see .gitignore + FORK.md).
-if [ ! -f "${DUCKDB_DIR}/CMakeLists.txt" ]; then
-  echo "--- DuckDB source not found at ${DUCKDB_DIR} — running download-duckdb.sh ---"
-  bash "${SCRIPT_DIR}/download-duckdb.sh"
-fi
-
-# Step 1: Configure extensions
-echo "--- Configuring extensions ---"
-
 # Try to read extensions from Podfile.properties.json (Expo managed workflow)
 EXTENSIONS_FROM_PROPS=""
 for CANDIDATE in "${REPO_DIR}/../ios/Podfile.properties.json" "${REPO_DIR}/../../ios/Podfile.properties.json"; do
@@ -37,6 +25,32 @@ for CANDIDATE in "${REPO_DIR}/../ios/Podfile.properties.json" "${REPO_DIR}/../..
     break
   fi
 done
+
+# Step 0a: Prefer a prebuilt xcframework from GitHub releases — drops
+# pod install from a full CMake source build (~15-30 min cold, needs
+# vcpkg + AWSSDK for iceberg) to a download. Opt out with
+# DUCKDB_BUILD_FROM_SOURCE=1; any fetch failure (no asset for this
+# extension set, offline, checksum mismatch) falls through to the
+# source build below.
+if [ "${DUCKDB_BUILD_FROM_SOURCE:-0}" != "1" ]; then
+  if bash "${SCRIPT_DIR}/fetch-prebuilt-duckdb.sh" "${EXTENSIONS_FROM_PROPS}"; then
+    echo "=== Using prebuilt DuckDB.xcframework (DUCKDB_BUILD_FROM_SOURCE=1 to compile instead) ==="
+    exit 0
+  fi
+  echo "--- No prebuilt xcframework available — building from source ---"
+fi
+
+# Step 0: Ensure DuckDB source tree is present.
+# The full source tree (CMakeLists.txt + src/include/ + extension/) is
+# fetched at pod-install time by scripts/download-duckdb.sh — kept out
+# of the fork checkout (see .gitignore + FORK.md).
+if [ ! -f "${DUCKDB_DIR}/CMakeLists.txt" ]; then
+  echo "--- DuckDB source not found at ${DUCKDB_DIR} — running download-duckdb.sh ---"
+  bash "${SCRIPT_DIR}/download-duckdb.sh"
+fi
+
+# Step 1: Configure extensions
+echo "--- Configuring extensions ---"
 
 if [ -n "$EXTENSIONS_FROM_PROPS" ]; then
   node "${SCRIPT_DIR}/configure-extensions.js" --duckdb-path "${DUCKDB_DIR}" --extensions "${EXTENSIONS_FROM_PROPS}"
