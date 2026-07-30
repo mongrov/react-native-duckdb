@@ -39,3 +39,4 @@ local.properties
 .DS_Store
 *.tsbuildinfo
 *.log
+.duckdb-prebuilt
