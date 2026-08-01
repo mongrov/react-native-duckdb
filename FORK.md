@@ -142,8 +142,16 @@ ZivaOne iOS build on 2026-07-28.
 
 - **iOS pod-install verification** — 20-40 min per iteration; needs
   Xcode + iOS simulator. Verify DuckDB.xcframework builds and links.
-- **Android build verification** — CMakeLists + JNI adapter. Confirm
-  extensions link correctly.
+- ~~**Android build verification**~~ — **done 2026-07-31**: green
+  `assembleDebug` for arm64-v8a + x86_64 with iceberg+httpfs+parquet,
+  verified via ZivaOne (`libRNDuckDB.so` carries duckdb/Aws/iceberg/
+  roaring symbols). 32-bit ABIs skip iceberg+httpfs by design. Needs
+  vcpkg triplets `arm64-android-release` + `x64-android-release` with
+  the AWSSDK dep set installed (same recipe as iOS, see
+  §Prebuilt xcframework publishing / build scripts). Remaining
+  Android follow-up: runtime smoke on an emulator/device (build +
+  symbol level verified only), and a prebuilt-.so hosting path
+  mirroring the iOS xcframework release if consumer build times hurt.
 - **Merge to `mongrov-releases`** — once both platforms verify, cut
   a release branch and pin consumers to a SHA there (not the WIP
   branch head).
