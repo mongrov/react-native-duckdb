@@ -3,6 +3,10 @@
   "tag": "prebuilt-ios-duckdb-v1.4.4-r1",
   "duckdb": "v1.4.4",
   "artifacts": {
+    "core_functions,icu,parquet": {
+      "asset": "DuckDB-ios-core_functions-icu-parquet.tar.gz",
+      "sha256": "921c15a7d54833b0e7a0b9ad424db7871b3f11f745c482eab96a9b71bfbceb06"
+    },
     "httpfs,iceberg,parquet": {
       "asset": "DuckDB-ios-httpfs-iceberg-parquet.tar.gz",
       "sha256": "aa1bc20a9df624824f4f438f5d9f77ce2a3ab4657f1dd806d5d8cc2f1823af7c"
