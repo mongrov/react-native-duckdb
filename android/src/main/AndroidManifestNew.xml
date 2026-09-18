@@ -1,3 +1,21 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+  <!--
+    Registers the init provider that hands the app's files / database /
+    external dirs to the native side (DocPathSetter) before any DuckDB call.
+
+    This file is the one AGP >= 7.3 builds use (see `supportsNamespace()` in
+    build.gradle); the provider was declared only in the legacy
+    AndroidManifest.xml, so on every modern build it never ran. The native
+    paths stayed empty: DEFAULT_PATH was '', the default database path
+    resolved to the filesystem root, and home_directory was '' — which fails
+    DuckDB.open as soon as anything needs the extension directory.
+  -->
+  <application>
+    <provider
+      android:name="com.rnduckdb.RNDuckDBInitProvider"
+      android:authorities="${applicationId}.rnduckdb.init"
+      android:exported="false" />
+  </application>
+
 </manifest>
