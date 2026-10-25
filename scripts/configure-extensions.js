@@ -203,13 +203,19 @@ function main() {
     }
   }
 
-  // Warn on empty extensions
-  if (extensions.length === 0) {
+  // core_functions is always linked. It holds sum(), avg(), list_value(),
+  // date_trunc() and timezone(), so ordinary SQL fails without it. It used
+  // to be linked only when no list was given (it is a DuckDB default), so any
+  // explicit list that left it out emitted SKIP_EXTENSIONS "core_functions"
+  // and dropped it silently — which cost a full debugging cycle downstream
+  // (mongrov/mongrov-packages#5).
+  if (!extensions.includes('core_functions')) {
     console.warn(
-      '⚠️  react-native-duckdb: No extensions configured. Common SQL functions like ' +
-        'sum(), avg(), and list_value() will be unavailable. Add extensions in your ' +
-        'package.json under "react-native-duckdb".build.extensions'
+      '⚠️  react-native-duckdb: adding core_functions to the configured extensions ' +
+        `(${extensions.length > 0 ? extensions.join(', ') : 'none'}). It is always linked: ` +
+        'without it sum(), avg(), date_trunc() and timezone() are unavailable.'
     );
+    extensions = ['core_functions', ...extensions];
   }
 
   // Validate extension names
@@ -228,7 +234,7 @@ function main() {
   const outputPath = path.join(duckdbPath, 'extension', 'extension_config_local.cmake');
   fs.writeFileSync(outputPath, cmakeContent);
   console.log(`✅ react-native-duckdb: Generated ${outputPath}`);
-  console.log(`   Extensions: ${extensions.length > 0 ? extensions.join(', ') : '(none — defaults skipped)'}`);
+  console.log(`   Extensions: ${extensions.join(', ')}`);
 
   // Write marker file for build cache
   const markerPath = path.join(duckdbPath, '.extensions-configured');

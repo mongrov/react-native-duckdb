@@ -138,6 +138,22 @@ extensions `httpfs,iceberg,parquet` (the ZivaOne shape), built from
 the toolchain at `784c135`; same binary verified end-to-end in the
 ZivaOne iOS build on 2026-07-28.
 
+## Known limitations
+
+- **No `system` catalog on iOS.** SQL that resolves through DuckDB's `system`
+  catalog fails with `Binder Error: Referenced table "system" not found!`.
+  Seen on 2026-08-12 for `SELECT current_database()` and
+  `information_schema.columns`. Use the PRAGMA forms instead:
+  `PRAGMA database_list` for the current database, and
+  `PRAGMA table_info('<table>')` for columns. `@mongrov/analytics` (0.8.3,
+  0.8.5) already does this. Any other `information_schema.*` / `duckdb_*()`
+  catalog surface should be assumed affected until checked on device. Root
+  cause not yet found (mongrov/mongrov-packages#5).
+- **`core_functions` is always linked.** `scripts/configure-extensions.js`
+  adds it to any configured list and says so at build time. It used to be
+  linked only when no list was given, so an explicit list without it silently
+  dropped `sum()`, `avg()`, `date_trunc()` and `timezone()`.
+
 ## What is NOT yet done
 
 - **iOS pod-install verification** — 20-40 min per iteration; needs
